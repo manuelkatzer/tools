@@ -62,7 +62,7 @@ crs = [
 geo = [
     { name = "geopandas" },
 ]
-verarbeiten = [
+process = [
     { name = "laspy", extra = ["lazrs"] },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -72,12 +72,12 @@ verarbeiten = [
 [package.metadata]
 requires-dist = [
     { name = "geopandas", marker = "extra == 'geo'", specifier = ">=1.0" },
-    { name = "laspy", extras = ["lazrs"], marker = "extra == 'verarbeiten'", specifier = ">=2.5" },
+    { name = "laspy", extras = ["lazrs"], marker = "extra == 'process'", specifier = ">=2.5" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pyproj", marker = "extra == 'crs'", specifier = ">=3.6" },
-    { name = "scipy", marker = "extra == 'verarbeiten'", specifier = ">=1.11" },
+    { name = "scipy", marker = "extra == 'process'", specifier = ">=1.11" },
 ]
-provides-extras = ["crs", "verarbeiten", "geo"]
+provides-extras = ["crs", "process", "geo"]
 
 [[package]]
 name = "laspy"
