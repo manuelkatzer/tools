@@ -3,16 +3,16 @@
 __pycache__/
 *.pyc
 
-# uv verwaltet die Lockdatei - die gehoert INS Repo, nicht hierher:
-# uv.lock  <- bewusst nicht ignoriert
+# uv.lock belongs IN the repo - deliberately not ignored
 
-# Ausgaben der Pipeline
+# pipeline output
 index/
 index_*/
+idx/
 *.copc.laz
-achse_*.txt
+axis_*.txt
 footprints.csv
-treffer.csv
+matches.csv
 
-# Zugangsdaten
+# credentials
 .smbcred

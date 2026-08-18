@@ -1,26 +1,26 @@
 [project]
 name = "las-gt-pipeline"
 version = "0.1.0"
-description = "LAS/LAZ-Header gegen Ground-Truth abgleichen und Treffer zu COPC-Kacheln verarbeiten"
+description = "Match LAS/LAZ headers against ground truth and tile the hits into COPC"
 requires-python = ">=3.10"
 
-# Minimum fuer 'index' und 'achse': nur numpy.
+# Minimum for 'index' and 'axis': numpy only.
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
-# Echte CRS-Transformationen (ohne pyproj werden nur die naiven
-# GK-Zonenverschiebungen getestet - siehe erzeuge_kandidaten()).
+# Real CRS transformations. Without pyproj only the naive Gauss-Krueger
+# zone shifts are tested (see build_candidates()).
 crs = ["pyproj>=3.6"]
 
-# 'verarbeiten': Kachelung mit las_zu_copc_tiles.py.
-# ACHTUNG: das PDAL-Kommandozeilenprogramm ist KEIN Python-Paket und muss
-# separat installiert werden (Arch: sudo pacman -S pdal).
-verarbeiten = ["laspy[lazrs]>=2.5", "scipy>=1.11"]
+# 'process': tiling via las_zu_copc_tiles.py.
+# NOTE: the PDAL command-line tool is NOT a Python package and must be
+# installed separately (Arch: sudo pacman -S pdal).
+process = ["laspy[lazrs]>=2.5", "scipy>=1.11"]
 
-# Nur noetig, wenn die eingebauten .gpkg/.shp-Leser nicht ausreichen
-# (z.B. Nicht-Punkt-Geometrien). Zieht GDAL-Wheels nach, entsprechend gross.
+# Only needed when the built-in .gpkg/.shp readers are not enough
+# (e.g. non-point geometries). Pulls in GDAL wheels, so it is large.
 geo = ["geopandas>=1.0"]
 
 [tool.uv]
-# Kein Paket-Build - die Skripte werden direkt per 'uv run' aufgerufen.
+# No package build - the scripts are invoked directly via 'uv run'.
 package = false
