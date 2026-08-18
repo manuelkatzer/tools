@@ -1,0 +1,26 @@
+[project]
+name = "las-gt-pipeline"
+version = "0.1.0"
+description = "LAS/LAZ-Header gegen Ground-Truth abgleichen und Treffer zu COPC-Kacheln verarbeiten"
+requires-python = ">=3.10"
+
+# Minimum fuer 'index' und 'achse': nur numpy.
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+# Echte CRS-Transformationen (ohne pyproj werden nur die naiven
+# GK-Zonenverschiebungen getestet - siehe erzeuge_kandidaten()).
+crs = ["pyproj>=3.6"]
+
+# 'verarbeiten': Kachelung mit las_zu_copc_tiles.py.
+# ACHTUNG: das PDAL-Kommandozeilenprogramm ist KEIN Python-Paket und muss
+# separat installiert werden (Arch: sudo pacman -S pdal).
+verarbeiten = ["laspy[lazrs]>=2.5", "scipy>=1.11"]
+
+# Nur noetig, wenn die eingebauten .gpkg/.shp-Leser nicht ausreichen
+# (z.B. Nicht-Punkt-Geometrien). Zieht GDAL-Wheels nach, entsprechend gross.
+geo = ["geopandas>=1.0"]
+
+[tool.uv]
+# Kein Paket-Build - die Skripte werden direkt per 'uv run' aufgerufen.
+package = false

@@ -1,0 +1,18 @@
+# uv / venv
+.venv/
+__pycache__/
+*.pyc
+
+# uv verwaltet die Lockdatei - die gehoert INS Repo, nicht hierher:
+# uv.lock  <- bewusst nicht ignoriert
+
+# Ausgaben der Pipeline
+index/
+index_*/
+*.copc.laz
+achse_*.txt
+footprints.csv
+treffer.csv
+
+# Zugangsdaten
+.smbcred
