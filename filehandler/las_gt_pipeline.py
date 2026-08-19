@@ -62,7 +62,6 @@ import os
 import re
 import shutil
 import struct
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -77,7 +76,7 @@ VLR_MAX_BYTES = 65_536  # upper read limit for CRS detection
 
 
 def is_url(source: str) -> bool:
-    return source.startswith("http://") or source.startswith("https://")
+    return source.startswith(("http://", "https://"))
 
 
 def read_head_bytes(source: str, n: int) -> bytes:
@@ -94,9 +93,7 @@ def read_head_bytes(source: str, n: int) -> bytes:
         return fh.read(n)
 
 
-def collect_sources(
-    directory: Path | None, url_list: Path | None, pattern: str
-) -> list[str]:
+def collect_sources(directory: Path | None, url_list: Path | None, pattern: str) -> list[str]:
     sources: list[str] = []
     if directory:
         for path in sorted(directory.rglob(pattern)):
@@ -109,8 +106,8 @@ def collect_sources(
                     sources.append(str(path))
     if url_list:
         with open(url_list, encoding="utf-8-sig") as fh:
-            for row in fh:
-                row = row.strip()
+            for raw_row in fh:
+                row = raw_row.strip()
                 if row and not row.startswith("#"):
                     sources.append(row)
     return sources
@@ -173,9 +170,7 @@ def epsg_from_vlrs(raw: bytes, header_size: int, vlr_count: int) -> str | None:
             continue
         if record_id == 2112 and data:  # WKT
             wkt = data.rstrip(b"\x00").decode("latin-1", "ignore")
-            matches = re.findall(
-                r'(?:AUTHORITY|ID)\s*\[\s*"EPSG"\s*,\s*"?(\d+)"?\s*\]', wkt
-            )
+            matches = re.findall(r'(?:AUTHORITY|ID)\s*\[\s*"EPSG"\s*,\s*"?(\d+)"?\s*\]', wkt)
             if matches:
                 return f"EPSG:{matches[-1]}"
             return "WKT without EPSG code"
@@ -203,8 +198,10 @@ def read_las_info(source: str, mit_crs: bool = True) -> dict:
             if n > len(raw):  # VLRs extend beyond the first read
                 raw = read_head_bytes(source, n)
             info["crs"] = epsg_from_vlrs(raw, info["header_size"], info["vlr_count"])
-        except Exception:  # noqa: BLE001 - CRS is extra info only
-            pass
+        except (OSError, ValueError, struct.error):
+            # CRS is extra info only; a file without readable VLRs still
+            # yields a usable bounding box, so this must not abort the scan.
+            info["crs"] = None
     return info
 
 
@@ -225,21 +222,19 @@ def km_from_name(name: str) -> tuple[float | None, float | None]:
 
 
 def _load_gt_geopandas(path: Path, columns: tuple[str, str] | None):
-    import geopandas as gpd  # noqa: PLC0415
+    import geopandas as gpd
 
     g = gpd.read_file(path)
     crs = g.crs.to_string() if g.crs is not None else None
     if columns:
-        xy = np.column_stack(
-            [g[columns[0]].to_numpy(float), g[columns[1]].to_numpy(float)]
-        )
+        xy = np.column_stack([g[columns[0]].to_numpy(float), g[columns[1]].to_numpy(float)])
         return xy, None  # CRS of the attributes is unknown
     geo = g.geometry.representative_point()
     return np.column_stack([geo.x.to_numpy(), geo.y.to_numpy()]), crs
 
 
 def _load_gt_fiona(path: Path, columns: tuple[str, str] | None):
-    import fiona  # noqa: PLC0415
+    import fiona
 
     points = []
     with fiona.open(path) as src:
@@ -303,7 +298,7 @@ def _gpkg_blob_to_xy(blob: bytes) -> tuple[float, float] | None:
 
 def _load_gt_gpkg(path: Path, layer: str | None, columns: tuple[str, str] | None):
     """Minimal reader for point GeoPackages via sqlite3."""
-    import sqlite3  # noqa: PLC0415
+    import sqlite3
 
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
@@ -324,9 +319,7 @@ def _load_gt_gpkg(path: Path, layer: str | None, columns: tuple[str, str] | None
                 f"(others: {', '.join(t for t, _ in rows[1:])})"
             )
         if columns:
-            rows = con.execute(
-                f'SELECT "{columns[0]}","{columns[1]}" FROM "{table}"'
-            ).fetchall()
+            rows = con.execute(f'SELECT "{columns[0]}","{columns[1]}" FROM "{table}"').fetchall()
             xy = np.array(
                 [(float(a), float(b)) for a, b in rows if a is not None],
                 dtype=np.float64,
@@ -342,16 +335,12 @@ def _load_gt_gpkg(path: Path, layer: str | None, columns: tuple[str, str] | None
                 xy = _gpkg_blob_to_xy(blob)
                 if xy:
                     points.append(xy)
-        return np.array(points, dtype=np.float64), (
-            f"EPSG:{srs_id}" if srs_id else None
-        )
+        return np.array(points, dtype=np.float64), (f"EPSG:{srs_id}" if srs_id else None)
     finally:
         con.close()
 
 
-def load_gt(
-    path: Path, layer: str | None, columns: tuple[str, str] | None
-) -> tuple[np.ndarray, str | None]:
+def load_gt(path: Path, layer: str | None, columns: tuple[str, str] | None) -> tuple[np.ndarray, str | None]:
     errors = []
     for name, func in (
         ("geopandas", lambda: _load_gt_geopandas(path, columns)),
@@ -363,7 +352,7 @@ def load_gt(
             return xy, crs
         except ImportError:
             continue
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"{name}: {exc}")
     suffix = path.suffix.lower()
     try:
@@ -375,7 +364,7 @@ def load_gt(
             raise ValueError(f"format {suffix} not readable without geopandas/fiona")
         print(f"GT read with built-in reader: {len(xy)} points, CRS per file: {crs}")
         return xy, crs
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         errors.append(f"built-in: {exc}")
     raise SystemExit("could not read the GT file:\n  " + "\n  ".join(errors))
 
@@ -422,16 +411,12 @@ def build_candidates(
         ):
             candidates.append((name, gt_xy + np.array([delta, 0.0])))
     else:
-        candidates.append(
-            ("X - 3,000,000 (GK zone removed)", gt_xy - np.array([3_000_000.0, 0.0]))
-        )
-        candidates.append(
-            ("X - 4,000,000 (GK zone removed)", gt_xy - np.array([4_000_000.0, 0.0]))
-        )
+        candidates.append(("X - 3,000,000 (GK zone removed)", gt_xy - np.array([3_000_000.0, 0.0])))
+        candidates.append(("X - 4,000,000 (GK zone removed)", gt_xy - np.array([4_000_000.0, 0.0])))
     if not las_crs or not las_crs.upper().startswith("EPSG:"):
         return candidates
     try:
-        from pyproj import Transformer  # noqa: PLC0415
+        from pyproj import Transformer
     except ImportError:
         print("  note: pyproj not installed - real reprojections will not be tested.")
         return candidates
@@ -448,7 +433,9 @@ def build_candidates(
             new_xy = np.column_stack([x, y])
             if np.isfinite(new_xy).all():
                 candidates.append((f"GT as {source} -> {las_crs}", new_xy))
-        except Exception:  # noqa: BLE001
+        except (ValueError, RuntimeError, OSError) as exc:
+            # An unusable CRS pair is normal here - we are probing candidates.
+            print(f"  candidate {source} skipped: {exc}")
             continue
     return candidates
 
@@ -473,9 +460,7 @@ def cmd_index(args: argparse.Namespace) -> None:
     sources = collect_sources(args.las_dir, args.url_list, args.pattern)
     if not sources:
         raise SystemExit("no LAS/LAZ files found - check --las-dir / --url-list.")
-    print(
-        f"{len(sources)} LAS/LAZ sources found, reading headers (only ~{LAS_HEADER_BYTES} bytes each)..."
-    )
+    print(f"{len(sources)} LAS/LAZ sources found, reading headers (only ~{LAS_HEADER_BYTES} bytes each)...")
 
     infos: list[dict] = []
     failed: list[tuple[str, str]] = []
@@ -483,7 +468,7 @@ def cmd_index(args: argparse.Namespace) -> None:
     for i, source in enumerate(sources, start=1):
         try:
             infos.append(read_las_info(source, mit_crs=not args.no_crs_detection))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             failed.append((source, str(exc)))
         if i % 25 == 0 or i == len(sources):
             print(
@@ -491,16 +476,14 @@ def cmd_index(args: argparse.Namespace) -> None:
                 flush=True,
             )
     if failed:
-        print(
-            f"  {len(failed)} file(s) unreadable, e.g. {failed[0][0]}: {failed[0][1]}"
-        )
+        print(f"  {len(failed)} file(s) unreadable, e.g. {failed[0][0]}: {failed[0][1]}")
     if not infos:
         raise SystemExit("not a single header could be read.")
 
     crs_values = {i["crs"] for i in infos if i["crs"]}
     las_crs = None
     if crs_values:
-        las_crs = sorted(crs_values)[0]
+        las_crs = min(crs_values)
         print(f"CRS per LAS VLRs: {', '.join(sorted(crs_values))}")
     else:
         print("CRS per LAS VLRs: not set (these files carry no CRS!)")
@@ -520,9 +503,7 @@ def cmd_index(args: argparse.Namespace) -> None:
         min(i["miny"] for i in infos),
         max(i["maxy"] for i in infos),
     )
-    print(
-        f"LAS extent: X {total[0]:.1f}..{total[1]:.1f}, Y {total[2]:.1f}..{total[3]:.1f}"
-    )
+    print(f"LAS extent: X {total[0]:.1f}..{total[1]:.1f}, Y {total[2]:.1f}..{total[3]:.1f}")
 
     print("\nCRS variants (hits = GT points falling inside at least one LAS box):")
     scored = []
@@ -609,15 +590,11 @@ def cmd_index(args: argparse.Namespace) -> None:
     if matches:
         km_values = [float(z["km_from"]) for z in matches if z["km_from"]]
         if km_values:
-            print(
-                f"kilometre range of the matches: {min(km_values):.3f} - {max(km_values):.3f}"
-            )
+            print(f"kilometre range of the matches: {min(km_values):.3f} - {max(km_values):.3f}")
         densest = sorted(matches, key=lambda z: -z["gt_points"])[:10]
         print("Densest files (start here):")
         for z in densest:
-            print(
-                f"  {z['gt_points']:4d} GT points  {z['points']:>12,} points  {z['name']}"
-            )
+            print(f"  {z['gt_points']:4d} GT points  {z['points']:>12,} points  {z['name']}")
     print(f"\nWritten:\n  {fp_path}\n  {tr_path}")
     print(
         "\nCheck in QGIS: Layer > Data Source Manager > Delimited Text, "
@@ -661,15 +638,9 @@ def axis_from_csv(path: Path, columns: tuple[int, int] | None) -> np.ndarray:
         ix, iy = columns
         data = rows[1:] if has_header else rows
     elif has_header:
-        ix = _find_column(
-            header_row, ["x", "easting", "east", "e", "rechtswert", "x[m]", "x_m"]
-        )
-        iy = _find_column(
-            header_row, ["y", "northing", "north", "n", "hochwert", "y[m]", "y_m"]
-        )
-        it = _find_column(
-            header_row, ["time", "timestamp", "gps_time", "gpstime", "t", "zeit", "sec"]
-        )
+        ix = _find_column(header_row, ["x", "easting", "east", "e", "rechtswert", "x[m]", "x_m"])
+        iy = _find_column(header_row, ["y", "northing", "north", "n", "hochwert", "y[m]", "y_m"])
+        it = _find_column(header_row, ["time", "timestamp", "gps_time", "gpstime", "t", "zeit", "sec"])
         if ix is None or iy is None:
             raise SystemExit(
                 f"could not detect x/y columns in {path.name}. Header: {header_row}\n"
@@ -681,25 +652,15 @@ def axis_from_csv(path: Path, columns: tuple[int, int] | None) -> np.ndarray:
         )
         data = rows[1:]
     else:
-        raise SystemExit(
-            f"{path.name} has no header row - please pass --columns <index_x>,<index_y>."
-        )
+        raise SystemExit(f"{path.name} has no header row - please pass --columns <index_x>,<index_y>.")
 
     points = []
     for z in data:
         if len(z) <= max(ix, iy):
             continue
         try:
-            x = (
-                float(z[ix].replace(",", "."))
-                if "," in z[ix] and "." not in z[ix]
-                else float(z[ix])
-            )
-            y = (
-                float(z[iy].replace(",", "."))
-                if "," in z[iy] and "." not in z[iy]
-                else float(z[iy])
-            )
+            x = float(z[ix].replace(",", ".")) if "," in z[ix] and "." not in z[ix] else float(z[ix])
+            y = float(z[iy].replace(",", ".")) if "," in z[iy] and "." not in z[iy] else float(z[iy])
         except ValueError:
             continue
         t = None
@@ -762,19 +723,17 @@ def cmd_axis(args: argparse.Namespace) -> None:
         xy = axis_from_csv(args.from_csv, args.columns)
         print(f"{len(xy)} trajectory points read")
     elif args.from_gt:
-        xy, crs = load_gt(args.from_gt, args.gt_layer, args.gt_columns)
+        xy, _crs = load_gt(args.from_gt, args.gt_layer, args.gt_columns)
         xy = remove_outliers(xy, args.gt_outlier_distance)
         xy = sort_along_track(xy)
-        print(
-            f"{len(xy)} GT points sorted along the track (please check the result in QGIS!)"
-        )
+        print(f"{len(xy)} GT points sorted along the track (please check the result in QGIS!)")
     else:
         raise SystemExit("please pass --from-csv or --from-gt.")
 
     # The axis MUST be in the same CRS as the LAS files, otherwise every point
     # lands in the same bin. The index run tells you which variant fits.
     if args.from_crs and args.to_crs:
-        from pyproj import Transformer  # noqa: PLC0415
+        from pyproj import Transformer
 
         tf = Transformer.from_crs(args.from_crs, args.to_crs, always_xy=True)
         x, y = tf.transform(xy[:, 0], xy[:, 1])
@@ -810,22 +769,22 @@ def cmd_axis(args: argparse.Namespace) -> None:
 def load_chunk_module(path_hint: Path | None):
     candidates = [path_hint] if path_hint else []
     candidates += [
+        Path(__file__).resolve().parent / "las_to_copc_tiles.py",
+        Path.cwd() / "las_to_copc_tiles.py",
         Path(__file__).resolve().parent / "las_zu_copc_tiles.py",
         Path.cwd() / "las_zu_copc_tiles.py",
     ]
     for k in candidates:
         if k and Path(k).is_file():
-            spec = importlib.util.spec_from_file_location("las_zu_copc_tiles", k)
+            spec = importlib.util.spec_from_file_location("las_to_copc_tiles", k)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             print(f"chunking script loaded: {k}")
             return module
-    raise SystemExit("las_zu_copc_tiles.py not found - please pass --chunk-script.")
+    raise SystemExit("las_to_copc_tiles.py not found - please pass --chunk-script.")
 
 
-def fetch_file(
-    source: str, target_dir: Path, copy_local: bool = False
-) -> tuple[Path, bool]:
+def fetch_file(source: str, target_dir: Path, copy_local: bool = False) -> tuple[Path, bool]:
     """Make the file available locally. Returns (path, is_temp?).
     Local/UNC paths are normally read in place (no needless copying). With
     copy_local=True the file is pulled onto the local disk first - worth it for
@@ -836,14 +795,14 @@ def fetch_file(
             return Path(source), False
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / Path(source.replace("\\", "/")).name
-        size = os.path.getsize(source)
+        size = Path(source).stat().st_size
         print(f"  copying {size / 1e9:.2f} GB -> {target}")
         start = time.monotonic()
         shutil.copyfile(source, target)
         duration = max(time.monotonic() - start, 1e-9)
         print(f"  done in {duration:.0f} s ({size / 1e6 / duration:.0f} MB/s)")
         return target, True
-    import urllib.request  # noqa: PLC0415
+    import urllib.request
 
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / source.rsplit("/", 1)[-1]
@@ -886,7 +845,7 @@ def cmd_process(args: argparse.Namespace) -> None:
     lzc = load_chunk_module(args.chunk_script)
     axis_xy = axis_station = None
     if args.axis_file:
-        axis_xy, axis_station = lzc.lade_achse_aus_datei(args.axis_file)
+        axis_xy, axis_station = lzc.load_axis_from_file(args.axis_file)
         print(f"axis loaded: {len(axis_xy)} vertices")
     else:
         print(
@@ -903,11 +862,7 @@ def cmd_process(args: argparse.Namespace) -> None:
     for i, row in enumerate(rows, start=1):
         source = row["source"]
         prio_dir = args.out / f"Prio_{prio}"
-        if (
-            prio_dir.exists()
-            and any(prio_dir.glob("segment_*.copc.laz"))
-            and not args.overwrite
-        ):
+        if prio_dir.exists() and any(prio_dir.glob("segment_*.copc.laz")) and not args.overwrite:
             print(
                 f"=== [{i}/{len(rows)}] {prio_dir.name} already exists -> skipped "
                 f"(--overwrite forces recomputation) ==="
@@ -923,7 +878,7 @@ def cmd_process(args: argparse.Namespace) -> None:
             continue
         path, is_temp = fetch_file(source, args.tmp_dir, args.copy_local)
         try:
-            lzc.verarbeite_datei(
+            lzc.process_file(
                 path,
                 prio_dir,
                 args.edge_length,
@@ -964,12 +919,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # --- index ---
-    p_index = sub.add_parser(
-        "index", help="read LAS headers and match them against the GT file"
-    )
-    p_index.add_argument(
-        "--gt", type=Path, required=True, help="GT file (.gpkg or .shp)"
-    )
+    p_index = sub.add_parser("index", help="read LAS headers and match them against the GT file")
+    p_index.add_argument("--gt", type=Path, required=True, help="GT file (.gpkg or .shp)")
     p_index.add_argument(
         "--gt-layer",
         default=None,
@@ -999,9 +950,7 @@ def main() -> None:
         default="*.las",
         help="file pattern (default *.las; *.laz is searched too)",
     )
-    p_index.add_argument(
-        "--las-crs", default=None, help="force the CRS of the LAS files, e.g. EPSG:5683"
-    )
+    p_index.add_argument("--las-crs", default=None, help="force the CRS of the LAS files, e.g. EPSG:5683")
     p_index.add_argument(
         "--buffer",
         type=float,
@@ -1020,9 +969,7 @@ def main() -> None:
         default=5000.0,
         help="ignore GT points further than this from the median (0 = off, default 5000)",
     )
-    p_index.add_argument(
-        "--no-crs-detection", action="store_true", help="skip reading VLRs (faster)"
-    )
+    p_index.add_argument("--no-crs-detection", action="store_true", help="skip reading VLRs (faster)")
     p_index.add_argument(
         "--index-out",
         type=Path,
@@ -1076,19 +1023,13 @@ def main() -> None:
         default=0.0,
         help="constant offset on X, e.g. 3000000 when the GK zone prefix is missing",
     )
-    p_axis.add_argument(
-        "--y-offset", type=float, default=0.0, help="constant offset on Y"
-    )
+    p_axis.add_argument("--y-offset", type=float, default=0.0, help="constant offset on Y")
     p_axis.add_argument("--out", type=Path, required=True, help="output file")
     p_axis.set_defaults(func=cmd_axis)
 
     # --- verarbeiten ---
-    p_proc = sub.add_parser(
-        "process", help="fetch matches, tile them, delete temporary LAS"
-    )
-    p_proc.add_argument(
-        "--matches", type=Path, required=True, help="matches.csv from the index run"
-    )
+    p_proc = sub.add_parser("process", help="fetch matches, tile them, delete temporary LAS")
+    p_proc.add_argument("--matches", type=Path, required=True, help="matches.csv from the index run")
     p_proc.add_argument("--out", type=Path, required=True, help="COPC root directory")
     p_proc.add_argument("--start-prio", type=int, default=1)
     p_proc.add_argument(
@@ -1116,12 +1057,8 @@ def main() -> None:
     p_proc.add_argument("--chunk-size", type=int, default=2_000_000)
     p_proc.add_argument("--sample-step", type=int, default=20)
     p_proc.add_argument("--window-length", type=float, default=20.0)
-    p_proc.add_argument(
-        "--chunk-script", type=Path, default=None, help="path to las_zu_copc_tiles.py"
-    )
-    p_proc.add_argument(
-        "--limit", type=int, default=None, help="process only the first N matches"
-    )
+    p_proc.add_argument("--chunk-script", type=Path, default=None, help="path to las_zu_copc_tiles.py")
+    p_proc.add_argument("--limit", type=int, default=None, help="process only the first N matches")
     p_proc.add_argument("--km-from", type=float, default=None)
     p_proc.add_argument("--km-to", type=float, default=None)
     p_proc.add_argument(
@@ -1129,9 +1066,7 @@ def main() -> None:
         action="store_true",
         help="recompute existing Prio_* folders",
     )
-    p_proc.add_argument(
-        "--dry-run", action="store_true", help="show what would happen, change nothing"
-    )
+    p_proc.add_argument("--dry-run", action="store_true", help="show what would happen, change nothing")
     p_proc.set_defaults(func=cmd_process)
 
     args = parser.parse_args()

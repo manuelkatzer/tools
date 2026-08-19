@@ -24,3 +24,48 @@ geo = ["geopandas>=1.0"]
 [tool.uv]
 # No package build - the scripts are invoked directly via 'uv run'.
 package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "W",    # pycodestyle
+  "F",    # pyflakes
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # bugbear
+  "SIM",  # simplify
+  "PIE",  # misc
+  "PL",   # pylint
+  "RUF",
+  "S",    # bandit
+  "PTH",  # pathlib
+  "FURB",
+  "N",    # naming
+  "ARG",  # unused arguments
+  "C4",   # comprehensions
+  "TRY",  # exception antipatterns
+]
+ignore = [
+  "S101",    # assert is fine
+  "PLR0912", # branch count: CLI dispatchers are inherently branchy
+  "PLR0913", # arg count: process_file takes 11 by design
+  "PLR0915", # statement count
+  "PLR0917", # positional arg count, same reason
+  "PLR2004", # magic values: LAS header byte offsets are inherently magic
+  "PLC0415", # deferred imports are deliberate - laspy/scipy/pyproj are
+  # optional, so `index` must run without them installed
+  "PTH123", # open() on an existing Path variable is fine
+  "TRY003", # long messages in raise are deliberate here
+  "TRY300",
+  "TRY301",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# LAS/LAZ work is byte-offset parsing; URLs come from the user's own list.
+"las_gt_pipeline.py" = ["S310", "S608"]
+# The pdal CLI is resolved via PATH by design, and /tmp is only a default.
+"las_to_copc_tiles.py" = ["S607", "S108"]

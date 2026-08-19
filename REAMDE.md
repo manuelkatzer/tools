@@ -85,8 +85,10 @@ Keep `--tmp-dir` and `--out` on the local filesystem, never on the share.
 
 ## Notes
 
-- `las_zu_copc_tiles.py` is loaded dynamically at runtime and still exposes
-  German function names (`lade_achse_aus_datei`, `verarbeite_datei`). The calls
-  in this script match those names; rename in both places together.
+- `las_zu_copc_tiles.py` is loaded dynamically at runtime by `process`. The
+  pipeline calls `load_axis_from_file()` and `process_file()` on it; if you
+  rename either, rename it in both files together.
+- `las_zu_copc_tiles.py` also works standalone:
+  `uv run las_zu_copc_tiles.py --input a.las --out ./COPC --axis-file axis.txt`
 - LAS filenames containing commas (`180,1_180,2`) are quoted in the output CSVs.
   Parse them with a real CSV reader, not `cut -d,`.
