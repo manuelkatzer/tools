@@ -13,6 +13,7 @@ idx/
 axis_*.txt
 footprints.csv
 matches.csv
-
+staging.log
+trajectory_pass.csv
 # credentials
 .smbcred
